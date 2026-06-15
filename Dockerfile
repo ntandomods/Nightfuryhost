@@ -6,9 +6,9 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm install --production || npm install
+RUN npm install --production
 
-# Copy application
+# Copy application source
 COPY . .
 
 # Create necessary directories
@@ -17,9 +17,9 @@ RUN mkdir -p logs sessions backups
 # Expose port
 EXPOSE 5000
 
-# Health check
+# Health check — uses PORT env var so it works on Render and locally
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:5000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})" || exit 1
+  CMD node -e "require('http').get('http://localhost:' + (process.env.PORT || 5000) + '/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"
 
 # Start application
 CMD ["npm", "start"]

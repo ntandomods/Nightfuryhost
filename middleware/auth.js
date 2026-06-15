@@ -12,8 +12,14 @@ module.exports = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
 
-    // Verify user still exists
-    const user = await User.findById(decoded.id);
+    // Verify user still exists — support both MongoDB and in-memory mode
+    let user;
+    if (global.dbConnected) {
+      user = await User.findById(decoded.id);
+    } else {
+      user = global.inMemoryDB.findUserById(decoded.id);
+    }
+
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
     }
@@ -23,7 +29,7 @@ module.exports = async (req, res, next) => {
       return res.status(403).json({ error: 'Account suspended' });
     }
 
-    req.user.isAdmin = user.isAdmin;
+    req.user.isAdmin = user.isAdmin || false;
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {

@@ -1,7 +1,14 @@
 const User = require('../models/User');
 const CoinTransaction = require('../models/CoinTransaction');
 const Stripe = require('stripe');
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Lazy-initialize Stripe so missing key doesn't crash startup
+const getStripe = () => {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY is not configured');
+  }
+  return new Stripe(process.env.STRIPE_SECRET_KEY);
+};
 
 // Coin pricing
 const COIN_PACKAGES = {
@@ -63,6 +70,7 @@ exports.purchaseCoins = async (req, res) => {
     const packageData = COIN_PACKAGES[packageId];
 
     // Create Stripe payment intent
+    const stripe = getStripe();
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(packageData.price * 100), // Convert to cents
       currency: 'usd',
@@ -92,6 +100,7 @@ exports.confirmCoinPurchase = async (req, res) => {
     const userId = req.user.id;
 
     // Verify payment with Stripe
+    const stripe = getStripe();
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
     if (paymentIntent.status !== 'succeeded') {

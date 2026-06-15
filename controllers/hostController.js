@@ -263,28 +263,64 @@ exports.getHostStats = async (req, res) => {
 async function deployToRender(host, user) {
   try {
     const renderApiKey = process.env.RENDER_API_KEY;
-    
-    const deploymentData = {
-      name: `nightfury-${host._id}`,
-      environmentId: 'env_' + host._id,
+
+    if (!renderApiKey) {
+      console.warn('RENDER_API_KEY not set — skipping real deployment, using placeholder URLs');
+      host.deploymentUrl = `https://nightfury-${host._id}.onrender.com`;
+      host.renderServiceId = `placeholder_${host._id}`;
+      host.status = 'running';
+      await host.save();
+      return;
+    }
+
+    // Use the Render v1 API to create a new web service
+    // Docs: https://api-docs.render.com/reference/create-service
+    const RENDER_API = 'https://api.render.com/v1';
+    const serviceName = `nightfury-bot-${host._id}`.slice(0, 63); // Render name max 63 chars
+
+    const payload = {
+      type: 'web_service',
+      name: serviceName,
+      ownerId: process.env.RENDER_OWNER_ID || undefined,
       serviceDetails: {
         env: 'node',
         buildCommand: 'npm install',
         startCommand: 'npm start',
+        region: 'oregon',
+        plan: 'free',
+        envSpecificDetails: {
+          buildCommand: 'npm install',
+          startCommand: 'npm start'
+        },
         envVars: [
           { key: 'BOT_NAME', value: host.botName },
-          { key: 'OWNER_NUMBERS', value: host.ownerNumbers.join(',') }
+          { key: 'OWNER_NUMBERS', value: (host.ownerNumbers || []).join(',') },
+          { key: 'NODE_ENV', value: 'production' }
         ]
-      }
+      },
+      // Deploy from the NightFuryBot GitHub repo
+      autoDeploy: 'yes',
+      repo: 'https://github.com/ntando-deeev/NightFuryBot',
+      branch: 'main'
     };
 
-    // This is a mock - replace with actual Render API call
-    host.deploymentUrl = `https://nightfury-${host._id}.onrender.com`;
-    host.renderServiceId = `srv_${host._id}`;
+    const response = await axios.post(`${RENDER_API}/services`, payload, {
+      headers: {
+        Authorization: `Bearer ${renderApiKey}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      }
+    });
+
+    const service = response.data.service || response.data;
+    host.renderServiceId = service.id;
+    host.deploymentUrl = service.serviceDetails?.url || `https://${serviceName}.onrender.com`;
+    host.status = 'deploying'; // Render deployment takes a minute; status updated via webhook/polling
     await host.save();
 
+    console.log(`✅ Render service created: ${service.id} — ${host.deploymentUrl}`);
   } catch (error) {
-    console.error('Render deployment error:', error);
+    console.error('Render deployment error:', error.response?.data || error.message);
     host.status = 'error';
     await host.save();
   }
@@ -292,10 +328,24 @@ async function deployToRender(host, user) {
 
 async function deleteFromRender(host) {
   try {
-    // Mock deletion - replace with actual Render API call
-    console.log(`Deleting service ${host.renderServiceId}`);
+    const renderApiKey = process.env.RENDER_API_KEY;
+
+    if (!renderApiKey || !host.renderServiceId || host.renderServiceId.startsWith('placeholder_')) {
+      console.log(`Skipping Render deletion for ${host.renderServiceId} (no key or placeholder)`);
+      return;
+    }
+
+    const RENDER_API = 'https://api.render.com/v1';
+    await axios.delete(`${RENDER_API}/services/${host.renderServiceId}`, {
+      headers: {
+        Authorization: `Bearer ${renderApiKey}`,
+        Accept: 'application/json'
+      }
+    });
+
+    console.log(`✅ Render service deleted: ${host.renderServiceId}`);
   } catch (error) {
-    console.error('Render deletion error:', error);
+    console.error('Render deletion error:', error.response?.data || error.message);
   }
 }
 

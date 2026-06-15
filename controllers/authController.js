@@ -7,16 +7,23 @@ const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
-// Email transporter
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: true,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASSWORD
+// Lazy email transporter — only created when SMTP is actually configured
+const getTransporter = () => {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD) {
+    return null;
   }
-});
+  const port = parseInt(process.env.SMTP_PORT, 10) || 587;
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port,
+    // port 465 uses SSL, everything else uses STARTTLS
+    secure: port === 465,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASSWORD
+    }
+  });
+};
 
 exports.register = async (req, res) => {
   try {

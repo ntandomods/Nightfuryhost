@@ -1,12 +1,20 @@
 const express = require('express');
 const auth = require('../middleware/auth');
 const Stripe = require('stripe');
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Lazy-initialize Stripe so a missing key doesn't crash startup
+const getStripe = () => {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY is not configured');
+  }
+  return new Stripe(process.env.STRIPE_SECRET_KEY);
+};
 
 const router = express.Router();
 
 router.get('/methods', auth, async (req, res) => {
   try {
+    const stripe = getStripe();
     const paymentMethods = await stripe.paymentMethods.list({
       customer: req.user.id,
       type: 'card'
@@ -25,6 +33,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   const sig = req.headers['stripe-signature'];
   
   try {
+    const stripe = getStripe();
     const event = stripe.webhooks.constructEvent(
       req.body,
       sig,

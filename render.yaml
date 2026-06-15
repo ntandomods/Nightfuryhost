@@ -1,11 +1,12 @@
 services:
+  # Backend API
   - type: web
     name: nightfury-hosting-api
     env: node
-    plan: standard
+    plan: free
     buildCommand: npm install
     startCommand: npm start
-    
+
     envVars:
       - key: NODE_ENV
         value: production
@@ -36,7 +37,7 @@ services:
       - key: CLOUDINARY_API_SECRET
         sync: false
       - key: CORS_ORIGIN
-        value: "https://*.onrender.com,https://yourdomain.com"
+        value: "https://nightfury-hosting-web.onrender.com"
       - key: SESSION_SECRET
         sync: false
 
@@ -45,21 +46,24 @@ services:
         name: X-API-Version
         value: "1.0"
 
+  # Frontend React static site
   - type: web
     name: nightfury-hosting-web
-    env: node
-    plan: standard
+    env: static
     buildCommand: cd frontend && npm install && npm run build
-    startCommand: cd frontend && npm start
-    staticSite: true
-    buildDir: frontend/build
+    staticPublishPath: frontend/build
 
     envVars:
       - key: REACT_APP_API_URL
         value: "https://nightfury-hosting-api.onrender.com/api"
 
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
 databases:
   - name: nightfury-db
     databaseName: nightfury_hosting
     user: admin
-    plan: standard
+    plan: free
