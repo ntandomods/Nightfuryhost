@@ -11,9 +11,10 @@ export const LoginPage = () => {
 
   const onSubmit = async (data) => {
     try {
-      await login(data.email, data.password);
+      const result = await login(data.email, data.password);
       toast.success('Welcome back!');
-      navigate('/dashboard');
+      // Admins go straight to the admin panel
+      navigate(result?.user?.isAdmin ? '/admin' : '/dashboard');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Login failed');
     }

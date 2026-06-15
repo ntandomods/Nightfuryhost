@@ -23,6 +23,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { PricingPage } from './pages/PricingPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { AdminPage } from './pages/AdminPage';
+import { AdminSetupPage } from './pages/AdminSetupPage';
 
 // Protected Route
 const ProtectedRoute = ({ children }) => {
@@ -46,6 +47,8 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/pricing" element={<PricingPage />} />
+          {/* One-time admin setup — publicly accessible but server-guarded */}
+          <Route path="/admin-setup" element={<AdminSetupPage />} />
         </Route>
 
         {/* Protected Routes */}

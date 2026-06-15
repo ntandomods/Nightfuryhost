@@ -71,30 +71,54 @@ app.use('/api/analytics', require('./routes/analytics'));
 // Admin routes
 app.use('/api/admin', require('./routes/admin'));
 
-// Init first admin (only works if no admin exists yet)
+// Init first admin — only works if no admin exists yet
 app.post('/api/init-admin', async (req, res) => {
   try {
-    const { email, password: pw, secret } = req.body;
+    const { email, password, secret } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
     if (secret !== (process.env.ADMIN_INIT_SECRET || 'nightfury-init')) {
       return res.status(403).json({ error: 'Invalid secret' });
     }
+
     const bcrypt = require('bcryptjs');
-    const jwt = require('jsonwebtoken');
+    const jwt   = require('jsonwebtoken');
 
     if (global.dbConnected) {
       const User = require('./models/User');
       const existing = await User.findOne({ isAdmin: true });
       if (existing) return res.status(400).json({ error: 'Admin already exists' });
-      const hashed = await bcrypt.hash(pw, 10);
-      const admin = new User({ username: 'admin', email, password: hashed, isAdmin: true, coins: 9999, tier: 'enterprise', subscriptionStatus: 'active', maxHosts: 999 });
+      // User model hashes password in pre-save hook — pass plain text
+      const admin = new User({
+        username: 'admin',
+        email,
+        password,
+        isAdmin: true,
+        coins: 9999,
+        tier: 'enterprise',
+        subscriptionStatus: 'active',
+        maxHosts: 999
+      });
       await admin.save();
       const token = jwt.sign({ id: admin._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
       return res.status(201).json({ success: true, message: 'Admin created', token });
     } else {
       const existing = global.inMemoryDB.getAllUsers().find(u => u.isAdmin);
       if (existing) return res.status(400).json({ error: 'Admin already exists' });
-      const hashed = await bcrypt.hash(pw, 10);
-      const admin = global.inMemoryDB.createUser({ username: 'admin', email, password: hashed, isAdmin: true, coins: 9999, tier: 'enterprise', subscriptionStatus: 'active', maxHosts: 999 });
+      const hashed = await bcrypt.hash(password, 10);
+      const admin  = global.inMemoryDB.createUser({
+        username: 'admin',
+        email,
+        password: hashed,
+        isAdmin: true,
+        coins: 9999,
+        tier: 'enterprise',
+        subscriptionStatus: 'active',
+        maxHosts: 999
+      });
       const token = jwt.sign({ id: admin._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
       return res.status(201).json({ success: true, message: 'Admin created (in-memory)', token });
     }
