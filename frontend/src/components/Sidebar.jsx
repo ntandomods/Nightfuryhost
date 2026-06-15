@@ -2,10 +2,11 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  FiGrid, FiServer, FiDollarSign, FiBarChart2, FiSettings, FiX
+  FiGrid, FiServer, FiDollarSign, FiBarChart2, FiSettings, FiX, FiShield
 } from 'react-icons/fi';
+import { useAuthStore } from '../store/authStore';
 
-const navItems = [
+const baseNavItems = [
   { to: '/dashboard', icon: FiGrid, label: 'Dashboard' },
   { to: '/hosts', icon: FiServer, label: 'My Hosts' },
   { to: '/coins', icon: FiDollarSign, label: 'Coins' },
@@ -14,6 +15,11 @@ const navItems = [
 ];
 
 export const Sidebar = ({ isOpen, setIsOpen }) => {
+  const { user } = useAuthStore();
+  const navItems = user?.isAdmin
+    ? [...baseNavItems, { to: '/admin', icon: FiShield, label: 'Admin Panel' }]
+    : baseNavItems;
+
   return (
     <>
       {/* Mobile overlay */}

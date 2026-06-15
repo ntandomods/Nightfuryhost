@@ -8,31 +8,52 @@ const router = express.Router();
 
 router.get('/', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
-    const hosts = await Host.find({ userId: req.user.id });
-    const transactions = await CoinTransaction.find({ userId: req.user.id })
-      .limit(10)
-      .sort('-createdAt');
+    let user, hosts, transactions;
+
+    if (global.dbConnected) {
+      user = await User.findById(req.user.id);
+      hosts = await Host.find({ userId: req.user.id });
+      transactions = await CoinTransaction.find({ userId: req.user.id })
+        .limit(10)
+        .sort('-createdAt');
+    } else {
+      user = global.inMemoryDB.findUserById(req.user.id);
+      hosts = global.inMemoryDB.getHostsByUser(req.user.id);
+      transactions = global.inMemoryDB.getTransactionsByUser
+        ? global.inMemoryDB.getTransactionsByUser(req.user.id).slice(0, 10)
+        : [];
+    }
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
     const stats = {
-      coins: user.coins,
+      coins: user.coins || 0,
       hosts: hosts.length,
       activeHosts: hosts.filter(h => h.status === 'running').length,
-      totalSpent: user.totalCoinsSpent,
-      tier: user.tier,
+      totalSpent: user.totalCoinsSpent || 0,
+      tier: user.tier || 'free',
       recentTransactions: transactions
     };
 
     res.status(200).json({ success: true, stats });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch dashboard' });
+    res.status(500).json({ error: 'Failed to fetch dashboard', message: error.message });
   }
 });
 
 router.get('/summary', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
-    const hosts = await Host.find({ userId: req.user.id });
+    let user, hosts;
+
+    if (global.dbConnected) {
+      user = await User.findById(req.user.id);
+      hosts = await Host.find({ userId: req.user.id });
+    } else {
+      user = global.inMemoryDB.findUserById(req.user.id);
+      hosts = global.inMemoryDB.getHostsByUser(req.user.id);
+    }
+
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
     const totalMessages = hosts.reduce((sum, h) => sum + (h.stats?.messagesProcessed || 0), 0);
     const totalUptime = hosts.reduce((sum, h) => sum + (h.stats?.uptime || 0), 0);
@@ -41,8 +62,8 @@ router.get('/summary', auth, async (req, res) => {
       user: {
         username: user.username,
         email: user.email,
-        tier: user.tier,
-        coins: user.coins
+        tier: user.tier || 'free',
+        coins: user.coins || 0
       },
       hosts: {
         total: hosts.length,
@@ -59,7 +80,7 @@ router.get('/summary', auth, async (req, res) => {
 
     res.status(200).json({ success: true, summary });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch summary' });
+    res.status(500).json({ error: 'Failed to fetch summary', message: error.message });
   }
 });
 

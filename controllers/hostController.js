@@ -3,71 +3,172 @@ const User = require('../models/User');
 const CoinTransaction = require('../models/CoinTransaction');
 const axios = require('axios');
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function getUser(id) {
+  if (global.dbConnected) return User.findById(id);
+  return global.inMemoryDB.findUserById(id);
+}
+
+async function getHostsByUser(userId) {
+  if (global.dbConnected) return Host.find({ userId }).sort('-createdAt');
+  return global.inMemoryDB.getHostsByUser(userId)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+async function getHostById(id) {
+  if (global.dbConnected) return Host.findById(id);
+  return global.inMemoryDB.findHostById(id);
+}
+
+async function removeHost(id) {
+  if (global.dbConnected) return Host.findByIdAndDelete(id);
+  return global.inMemoryDB.deleteHost(id);
+}
+
+async function saveUser(user) {
+  if (global.dbConnected) return user.save();
+  return global.inMemoryDB.updateUser(user._id, user);
+}
+
+async function logTransaction(data) {
+  if (global.dbConnected) {
+    const txn = new CoinTransaction(data);
+    await txn.save();
+    return txn;
+  }
+  return global.inMemoryDB.createCoinTransaction(data);
+}
+
+async function deployToRender(host, user) {
+  if (!process.env.RENDER_API_KEY) return;
+  try {
+    const response = await axios.post(
+      'https://api.render.com/v1/services',
+      {
+        type: 'web_service',
+        name: 'nightfury-' + host.botName + '-' + host._id,
+        ownerId: process.env.RENDER_OWNER_ID,
+        repo: 'https://github.com/ntandomods/Nightfuryhost',
+        branch: 'main',
+        buildCommand: 'npm install',
+        startCommand: 'npm start',
+        envVars: [
+          { key: 'NODE_ENV', value: 'production' },
+          { key: 'BOT_NAME', value: host.botName },
+          { key: 'HOST_ID', value: String(host._id) },
+        ],
+      },
+      { headers: { Authorization: 'Bearer ' + process.env.RENDER_API_KEY } }
+    );
+    const serviceId = response.data && response.data.service && response.data.service.id;
+    if (serviceId) {
+      const updates = {
+        renderServiceId: serviceId,
+        status: 'running',
+        deployUrl: 'https://' + response.data.service.slug + '.onrender.com',
+      };
+      if (global.dbConnected) {
+        await Host.findByIdAndUpdate(host._id, updates);
+      } else {
+        global.inMemoryDB.updateHost(host._id, updates);
+      }
+    }
+  } catch (err) {
+    console.error('Render deploy error:', err.message);
+  }
+}
+
+async function deleteFromRender(host) {
+  if (!process.env.RENDER_API_KEY || !host.renderServiceId) return;
+  try {
+    await axios.delete(
+      'https://api.render.com/v1/services/' + host.renderServiceId,
+      { headers: { Authorization: 'Bearer ' + process.env.RENDER_API_KEY } }
+    );
+  } catch (err) {
+    console.error('Render delete error:', err.message);
+  }
+}
+
 exports.createHost = async (req, res) => {
   try {
     const { botName, hostProvider, whatsappPhoneNumber, ownerNumbers } = req.body;
     const userId = req.user.id;
 
-    // Validation
     if (!botName || !hostProvider) {
       return res.status(400).json({ error: 'Bot name and provider are required' });
     }
 
-    // Check user's host limit
-    const user = await User.findById(userId);
-    const hostCount = await Host.countDocuments({ userId });
+    const user = await getUser(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-    if (hostCount >= user.maxHosts) {
+    const hosts = await getHostsByUser(userId);
+    const maxHosts = user.maxHosts || 1;
+
+    if (hosts.length >= maxHosts) {
       return res.status(400).json({
-        error: `You have reached your host limit (${user.maxHosts})`,
-        maxHosts: user.maxHosts,
-        currentHosts: hostCount
+        error: 'You have reached your host limit (' + maxHosts + ')',
+        maxHosts,
+        currentHosts: hosts.length,
       });
     }
 
-    // Check if user has enough coins
-    const coinCost = 50; // Initial deployment cost
-    if (user.coins < coinCost) {
+    const coinCost = 50;
+    if ((user.coins || 0) < coinCost) {
       return res.status(400).json({
-        error: `Insufficient coins. You need ${coinCost} coins but have ${user.coins}`,
+        error: 'Insufficient coins. You need ' + coinCost + ' coins but have ' + (user.coins || 0),
         coinsNeeded: coinCost,
-        coinsAvailable: user.coins
+        coinsAvailable: user.coins || 0,
       });
     }
 
-    // Create host
-    const host = new Host({
-      name: botName,
-      userId,
-      botName,
-      hostProvider,
-      whatsappPhoneNumber,
-      ownerNumbers: ownerNumbers || [],
-      status: 'deploying'
-    });
+    let host;
+    if (global.dbConnected) {
+      host = new Host({
+        name: botName,
+        userId,
+        botName,
+        hostProvider,
+        whatsappPhoneNumber,
+        ownerNumbers: ownerNumbers || [],
+        status: 'deploying',
+      });
+      await host.save();
+    } else {
+      host = global.inMemoryDB.createHost({
+        name: botName,
+        userId: parseInt(userId) || userId,
+        botName,
+        hostProvider,
+        whatsappPhoneNumber,
+        ownerNumbers: ownerNumbers || [],
+        status: 'deploying',
+      });
+    }
 
-    await host.save();
+    user.coins = (user.coins || 0) - coinCost;
+    user.totalCoinsSpent = (user.totalCoinsSpent || 0) + coinCost;
+    user.totalHostsCreated = (user.totalHostsCreated || 0) + 1;
+    await saveUser(user);
 
-    // Deduct coins
-    user.coins -= coinCost;
-    user.totalCoinsSpent += coinCost;
-    user.totalHostsCreated += 1;
-    await user.save();
-
-    // Log transaction
-    const transaction = new CoinTransaction({
-      userId,
+    await logTransaction({
+      userId: parseInt(userId) || userId,
       type: 'spent',
       amount: coinCost,
-      description: `Host deployment: ${botName}`,
+      description: 'Host deployment: ' + botName,
       hostId: host._id,
-      status: 'completed'
+      status: 'completed',
     });
-    await transaction.save();
 
-    // Deploy to Render (or other provider)
     if (hostProvider === 'render') {
-      await deployToRender(host, user);
+      deployToRender(host, user).catch(console.error);
+    } else {
+      if (global.dbConnected) {
+        await Host.findByIdAndUpdate(host._id, { status: 'running' });
+      } else {
+        global.inMemoryDB.updateHost(host._id, { status: 'running' });
+      }
     }
 
     res.status(201).json({
@@ -75,7 +176,7 @@ exports.createHost = async (req, res) => {
       message: 'Host created successfully',
       host,
       coinsDeducted: coinCost,
-      remainingCoins: user.coins
+      remainingCoins: user.coins,
     });
   } catch (error) {
     console.error(error);
@@ -85,14 +186,8 @@ exports.createHost = async (req, res) => {
 
 exports.getHosts = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const hosts = await Host.find({ userId }).sort('-createdAt');
-
-    res.status(200).json({
-      success: true,
-      count: hosts.length,
-      hosts
-    });
+    const hosts = await getHostsByUser(req.user.id);
+    res.status(200).json({ success: true, count: hosts.length, hosts });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch hosts', message: error.message });
   }
@@ -100,22 +195,10 @@ exports.getHosts = async (req, res) => {
 
 exports.getHost = async (req, res) => {
   try {
-    const { hostId } = req.params;
-    const host = await Host.findById(hostId);
-
-    if (!host) {
-      return res.status(404).json({ error: 'Host not found' });
-    }
-
-    // Check authorization
-    if (host.userId.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    res.status(200).json({
-      success: true,
-      host
-    });
+    const host = await getHostById(req.params.hostId);
+    if (!host) return res.status(404).json({ error: 'Host not found' });
+    if (String(host.userId) !== String(req.user.id)) return res.status(403).json({ error: 'Unauthorized' });
+    res.status(200).json({ success: true, host });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch host', message: error.message });
   }
@@ -123,32 +206,26 @@ exports.getHost = async (req, res) => {
 
 exports.updateHost = async (req, res) => {
   try {
-    const { hostId } = req.params;
     const { config, whatsappPhoneNumber, ownerNumbers } = req.body;
+    let host = await getHostById(req.params.hostId);
+    if (!host) return res.status(404).json({ error: 'Host not found' });
+    if (String(host.userId) !== String(req.user.id)) return res.status(403).json({ error: 'Unauthorized' });
 
-    let host = await Host.findById(hostId);
-
-    if (!host) {
-      return res.status(404).json({ error: 'Host not found' });
+    if (global.dbConnected) {
+      if (config) host.config = Object.assign({}, host.config, config);
+      if (whatsappPhoneNumber) host.whatsappPhoneNumber = whatsappPhoneNumber;
+      if (ownerNumbers) host.ownerNumbers = ownerNumbers;
+      host.updatedAt = Date.now();
+      await host.save();
+    } else {
+      const updates = {};
+      if (config) updates.config = config;
+      if (whatsappPhoneNumber) updates.whatsappPhoneNumber = whatsappPhoneNumber;
+      if (ownerNumbers) updates.ownerNumbers = ownerNumbers;
+      host = global.inMemoryDB.updateHost(host._id, updates);
     }
 
-    // Check authorization
-    if (host.userId.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    if (config) host.config = { ...host.config, ...config };
-    if (whatsappPhoneNumber) host.whatsappPhoneNumber = whatsappPhoneNumber;
-    if (ownerNumbers) host.ownerNumbers = ownerNumbers;
-
-    host.updatedAt = Date.now();
-    await host.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Host updated successfully',
-      host
-    });
+    res.status(200).json({ success: true, message: 'Host updated successfully', host });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update host', message: error.message });
   }
@@ -156,29 +233,14 @@ exports.updateHost = async (req, res) => {
 
 exports.deleteHost = async (req, res) => {
   try {
-    const { hostId } = req.params;
-    const host = await Host.findById(hostId);
+    const host = await getHostById(req.params.hostId);
+    if (!host) return res.status(404).json({ error: 'Host not found' });
+    if (String(host.userId) !== String(req.user.id)) return res.status(403).json({ error: 'Unauthorized' });
 
-    if (!host) {
-      return res.status(404).json({ error: 'Host not found' });
-    }
+    if (host.renderServiceId) await deleteFromRender(host);
+    await removeHost(req.params.hostId);
 
-    // Check authorization
-    if (host.userId.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    // Delete from Render if deployed
-    if (host.renderServiceId) {
-      await deleteFromRender(host);
-    }
-
-    await Host.findByIdAndDelete(hostId);
-
-    res.status(200).json({
-      success: true,
-      message: 'Host deleted successfully'
-    });
+    res.status(200).json({ success: true, message: 'Host deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete host', message: error.message });
   }
@@ -186,26 +248,14 @@ exports.deleteHost = async (req, res) => {
 
 exports.startHost = async (req, res) => {
   try {
-    const { hostId } = req.params;
-    let host = await Host.findById(hostId);
+    const host = await getHostById(req.params.hostId);
+    if (!host) return res.status(404).json({ error: 'Host not found' });
+    if (String(host.userId) !== String(req.user.id)) return res.status(403).json({ error: 'Unauthorized' });
 
-    if (!host) {
-      return res.status(404).json({ error: 'Host not found' });
-    }
+    if (global.dbConnected) { host.status = 'running'; await host.save(); }
+    else { global.inMemoryDB.updateHost(host._id, { status: 'running' }); }
 
-    if (host.userId.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    host.status = 'running';
-    host.stats.lastActive = new Date();
-    await host.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Host started successfully',
-      host
-    });
+    res.status(200).json({ success: true, message: 'Host started', host });
   } catch (error) {
     res.status(500).json({ error: 'Failed to start host', message: error.message });
   }
@@ -213,25 +263,14 @@ exports.startHost = async (req, res) => {
 
 exports.stopHost = async (req, res) => {
   try {
-    const { hostId } = req.params;
-    let host = await Host.findById(hostId);
+    const host = await getHostById(req.params.hostId);
+    if (!host) return res.status(404).json({ error: 'Host not found' });
+    if (String(host.userId) !== String(req.user.id)) return res.status(403).json({ error: 'Unauthorized' });
 
-    if (!host) {
-      return res.status(404).json({ error: 'Host not found' });
-    }
+    if (global.dbConnected) { host.status = 'stopped'; await host.save(); }
+    else { global.inMemoryDB.updateHost(host._id, { status: 'stopped' }); }
 
-    if (host.userId.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    host.status = 'stopped';
-    await host.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Host stopped successfully',
-      host
-    });
+    res.status(200).json({ success: true, message: 'Host stopped', host });
   } catch (error) {
     res.status(500).json({ error: 'Failed to stop host', message: error.message });
   }
@@ -239,114 +278,20 @@ exports.stopHost = async (req, res) => {
 
 exports.getHostStats = async (req, res) => {
   try {
-    const { hostId } = req.params;
-    const host = await Host.findById(hostId);
-
-    if (!host) {
-      return res.status(404).json({ error: 'Host not found' });
-    }
-
-    if (host.userId.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
+    const host = await getHostById(req.params.hostId);
+    if (!host) return res.status(404).json({ error: 'Host not found' });
+    if (String(host.userId) !== String(req.user.id)) return res.status(403).json({ error: 'Unauthorized' });
 
     res.status(200).json({
       success: true,
-      stats: host.stats
+      stats: {
+        status: host.status,
+        messagesProcessed: (host.stats && host.stats.messagesProcessed) || 0,
+        uptime: (host.stats && host.stats.uptime) || 0,
+        lastActive: (host.stats && host.stats.lastActive) || host.createdAt,
+      },
     });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch stats', message: error.message });
+    res.status(500).json({ error: 'Failed to fetch host stats', message: error.message });
   }
 };
-
-// Helper functions
-async function deployToRender(host, user) {
-  try {
-    const renderApiKey = process.env.RENDER_API_KEY;
-
-    if (!renderApiKey) {
-      console.warn('RENDER_API_KEY not set — skipping real deployment, using placeholder URLs');
-      host.deploymentUrl = `https://nightfury-${host._id}.onrender.com`;
-      host.renderServiceId = `placeholder_${host._id}`;
-      host.status = 'running';
-      await host.save();
-      return;
-    }
-
-    // Use the Render v1 API to create a new web service
-    // Docs: https://api-docs.render.com/reference/create-service
-    const RENDER_API = 'https://api.render.com/v1';
-    const serviceName = `nightfury-bot-${host._id}`.slice(0, 63); // Render name max 63 chars
-
-    const payload = {
-      type: 'web_service',
-      name: serviceName,
-      ownerId: process.env.RENDER_OWNER_ID || 'tea-d8l9b1svikkc73chq4s0',
-      serviceDetails: {
-        env: 'node',
-        buildCommand: 'npm install',
-        startCommand: 'npm start',
-        region: 'oregon',
-        plan: 'free',
-        envSpecificDetails: {
-          buildCommand: 'npm install',
-          startCommand: 'npm start'
-        },
-        envVars: [
-          { key: 'BOT_NAME', value: host.botName },
-          { key: 'OWNER_NUMBERS', value: (host.ownerNumbers || []).join(',') },
-          { key: 'NODE_ENV', value: 'production' }
-        ]
-      },
-      // Deploy from the NightFuryBot GitHub repo
-      autoDeploy: 'yes',
-      repo: 'https://github.com/ntando-deeev/NightFuryBot',
-      branch: 'main'
-    };
-
-    const response = await axios.post(`${RENDER_API}/services`, payload, {
-      headers: {
-        Authorization: `Bearer ${renderApiKey}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json'
-      }
-    });
-
-    const service = response.data.service || response.data;
-    host.renderServiceId = service.id;
-    host.deploymentUrl = service.serviceDetails?.url || `https://${serviceName}.onrender.com`;
-    host.status = 'deploying'; // Render deployment takes a minute; status updated via webhook/polling
-    await host.save();
-
-    console.log(`✅ Render service created: ${service.id} — ${host.deploymentUrl}`);
-  } catch (error) {
-    console.error('Render deployment error:', error.response?.data || error.message);
-    host.status = 'error';
-    await host.save();
-  }
-}
-
-async function deleteFromRender(host) {
-  try {
-    const renderApiKey = process.env.RENDER_API_KEY;
-
-    if (!renderApiKey || !host.renderServiceId || host.renderServiceId.startsWith('placeholder_')) {
-      console.log(`Skipping Render deletion for ${host.renderServiceId} (no key or placeholder)`);
-      return;
-    }
-
-    const RENDER_API = 'https://api.render.com/v1';
-    await axios.delete(`${RENDER_API}/services/${host.renderServiceId}`, {
-      headers: {
-        Authorization: `Bearer ${renderApiKey}`,
-        Accept: 'application/json'
-      }
-    });
-
-    console.log(`✅ Render service deleted: ${host.renderServiceId}`);
-  } catch (error) {
-    console.error('Render deletion error:', error.response?.data || error.message);
-  }
-}
-
-module.exports = exports;

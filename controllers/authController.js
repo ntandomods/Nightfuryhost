@@ -164,14 +164,30 @@ exports.login = async (req, res) => {
 
 exports.getCurrentUser = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    let user;
+    if (global.dbConnected) {
+      user = await User.findById(req.user.id);
+    } else {
+      user = global.inMemoryDB.findUserById(req.user.id);
+    }
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     res.status(200).json({
       success: true,
-      user
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        coins: user.coins,
+        tier: user.tier || 'free',
+        isAdmin: user.isAdmin || false,
+        profileImage: user.profileImage || null,
+        phoneNumber: user.phoneNumber || null,
+        subscriptionStatus: user.subscriptionStatus || 'inactive'
+      }
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch user', message: error.message });
@@ -182,21 +198,27 @@ exports.updateProfile = async (req, res) => {
   try {
     const { username, phoneNumber, profileImage } = req.body;
 
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      {
-        username,
-        phoneNumber,
-        profileImage,
-        updatedAt: Date.now()
-      },
-      { new: true, runValidators: true }
-    );
+    let user;
+    if (global.dbConnected) {
+      user = await User.findByIdAndUpdate(
+        req.user.id,
+        { username, phoneNumber, profileImage, updatedAt: Date.now() },
+        { new: true, runValidators: true }
+      );
+    } else {
+      user = global.inMemoryDB.updateUser(req.user.id, { username, phoneNumber, profileImage });
+    }
 
     res.status(200).json({
       success: true,
       message: 'Profile updated successfully',
-      user
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        coins: user.coins,
+        tier: user.tier || 'free'
+      }
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update profile', message: error.message });

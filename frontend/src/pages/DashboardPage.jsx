@@ -3,7 +3,7 @@ import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
-const API = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API = process.env.REACT_APP_API_URL || 'https://nightfury-hosting-api.onrender.com/api';
 
 const StatCard = ({ label, value, color }) => (
   <div className={`bg-white rounded-xl shadow p-5 border-l-4 ${color}`}>

@@ -3,7 +3,7 @@ import axios from 'axios';
 import { toast } from 'react-toastify';
 import { useAuthStore } from '../store/authStore';
 
-const API = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API = process.env.REACT_APP_API_URL || 'https://nightfury-hosting-api.onrender.com/api';
 
 export const CoinsPage = () => {
   const { token } = useAuthStore();

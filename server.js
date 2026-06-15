@@ -41,21 +41,22 @@ app.use(express.static(path.join(__dirname, 'public')));
 const connectDB = require('./config/database');
 const inMemoryDB = require('./config/inMemoryDB');
 
-let dbConnected = false;
+// Initialize globals before async resolution
+global.dbConnected = false;
+global.inMemoryDB = inMemoryDB;
+
 connectDB().then(conn => {
   if (conn) {
-    dbConnected = true;
+    global.dbConnected = true;
     console.log('✅ Using MongoDB');
   } else {
+    global.dbConnected = false;
     console.log('✅ Using In-Memory Database');
   }
 }).catch(err => {
+  global.dbConnected = false;
   console.error('DB Error:', err.message);
 });
-
-// Make DB info available globally
-global.dbConnected = dbConnected;
-global.inMemoryDB = inMemoryDB;
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -66,6 +67,41 @@ app.use('/api/payments', require('./routes/payments'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/bots', require('./routes/bots'));
 app.use('/api/analytics', require('./routes/analytics'));
+
+// Admin routes
+app.use('/api/admin', require('./routes/admin'));
+
+// Init first admin (only works if no admin exists yet)
+app.post('/api/init-admin', async (req, res) => {
+  try {
+    const { email, password: pw, secret } = req.body;
+    if (secret !== (process.env.ADMIN_INIT_SECRET || 'nightfury-init')) {
+      return res.status(403).json({ error: 'Invalid secret' });
+    }
+    const bcrypt = require('bcryptjs');
+    const jwt = require('jsonwebtoken');
+
+    if (global.dbConnected) {
+      const User = require('./models/User');
+      const existing = await User.findOne({ isAdmin: true });
+      if (existing) return res.status(400).json({ error: 'Admin already exists' });
+      const hashed = await bcrypt.hash(pw, 10);
+      const admin = new User({ username: 'admin', email, password: hashed, isAdmin: true, coins: 9999, tier: 'enterprise', subscriptionStatus: 'active', maxHosts: 999 });
+      await admin.save();
+      const token = jwt.sign({ id: admin._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+      return res.status(201).json({ success: true, message: 'Admin created', token });
+    } else {
+      const existing = global.inMemoryDB.getAllUsers().find(u => u.isAdmin);
+      if (existing) return res.status(400).json({ error: 'Admin already exists' });
+      const hashed = await bcrypt.hash(pw, 10);
+      const admin = global.inMemoryDB.createUser({ username: 'admin', email, password: hashed, isAdmin: true, coins: 9999, tier: 'enterprise', subscriptionStatus: 'active', maxHosts: 999 });
+      const token = jwt.sign({ id: admin._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+      return res.status(201).json({ success: true, message: 'Admin created (in-memory)', token });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create admin', message: err.message });
+  }
+});
 
 // Health check
 app.get('/health', (req, res) => {

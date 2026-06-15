@@ -92,6 +92,11 @@ class InMemoryDB {
     return Array.from(this.hosts.values());
   }
 
+  // Alias used by dashboard routes
+  getHostsByUser(userId) {
+    return this.findHostsByUserId(userId);
+  }
+
   // Coin operations
   createCoinTransaction(txnData) {
     const id = this.nextIds.coins++;
@@ -106,6 +111,11 @@ class InMemoryDB {
       if (txn.userId === parseInt(userId)) result.push(txn);
     }
     return result.sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  // Alias used by dashboard routes
+  getTransactionsByUser(userId) {
+    return this.findCoinTransactionsByUserId(userId);
   }
 
   // Subscription operations
