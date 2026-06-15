@@ -33,6 +33,14 @@ const hostSchema = new mongoose.Schema({
   sessionId: String,
   ownerNumbers: [String],
   openaiKey: String,
+  gitRepo: {
+    type: String,
+    default: 'https://github.com/ntando-deeev/NightFuryBot'
+  },
+  gitBranch: {
+    type: String,
+    default: 'main'
+  },
   isPublic: {
     type: Boolean,
     default: false

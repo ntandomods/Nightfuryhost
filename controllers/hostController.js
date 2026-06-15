@@ -70,9 +70,9 @@ async function deployToRender(host, user) {
         name: ('nightfury-' + host.botName + '-' + host._id)
           .toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 63),
         ownerId: process.env.RENDER_OWNER_ID,
-        // Deploy the actual bot repo, not the hosting platform
-        repo: 'https://github.com/ntando-deeev/NightFuryBot',
-        branch: 'main',
+        // Use the repo the user specified, fall back to the official NightFuryBot repo
+        repo: host.gitRepo || 'https://github.com/ntando-deeev/NightFuryBot',
+        branch: host.gitBranch || 'main',
         // Skip puppeteer download during build too
         buildCommand: 'PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install',
         startCommand: 'npm start',
@@ -124,7 +124,7 @@ async function deleteFromRender(host) {
 
 exports.createHost = async (req, res) => {
   try {
-    const { botName, hostProvider, whatsappPhoneNumber, ownerNumbers, sessionId, openaiKey } = req.body;
+    const { botName, hostProvider, whatsappPhoneNumber, ownerNumbers, sessionId, openaiKey, gitRepo, gitBranch } = req.body;
     const userId = req.user.id;
 
     if (!botName || !hostProvider) {
@@ -161,6 +161,12 @@ exports.createHost = async (req, res) => {
       return String(raw).split(',').map(s => s.trim()).filter(Boolean);
     };
 
+    // Normalise git repo URL — strip trailing slashes and .git suffix for consistency
+    const normaliseRepo = (raw) => {
+      if (!raw || !raw.trim()) return 'https://github.com/ntando-deeev/NightFuryBot';
+      return raw.trim().replace(/\.git$/, '').replace(/\/$/, '');
+    };
+
     let host;
     if (global.dbConnected) {
       host = new Host({
@@ -172,6 +178,8 @@ exports.createHost = async (req, res) => {
         ownerNumbers: normaliseOwners(ownerNumbers),
         sessionId: sessionId || '',
         openaiKey: openaiKey || '',
+        gitRepo: normaliseRepo(gitRepo),
+        gitBranch: (gitBranch || 'main').trim(),
         status: 'deploying',
       });
       await host.save();
@@ -185,6 +193,8 @@ exports.createHost = async (req, res) => {
         ownerNumbers: normaliseOwners(ownerNumbers),
         sessionId: sessionId || '',
         openaiKey: openaiKey || '',
+        gitRepo: normaliseRepo(gitRepo),
+        gitBranch: (gitBranch || 'main').trim(),
         status: 'deploying',
       });
     }

@@ -44,8 +44,46 @@ export const CreateHostPage = () => {
             {errors.botName && <p className="text-red-500 text-xs mt-1">{errors.botName.message}</p>}
           </div>
 
-          {/* Host Provider */}
-          <div>
+          {/* Git Repository */}
+          <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
+            <p className="text-sm font-semibold text-gray-700">📦 Bot Repository</p>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                GitHub Repo URL <span className="text-red-500">*</span>
+              </label>
+              <input
+                {...register('gitRepo', {
+                  required: 'GitHub repo URL is required',
+                  pattern: {
+                    value: /^https:\/\/github\.com\/[^/]+\/[^/]+/,
+                    message: 'Must be a valid GitHub URL — e.g. https://github.com/yourname/NightFuryBot',
+                  },
+                })}
+                className={field}
+                placeholder="https://github.com/yourname/NightFuryBot"
+                defaultValue="https://github.com/ntando-deeev/NightFuryBot"
+              />
+              {errors.gitRepo && <p className="text-red-500 text-xs mt-1">{errors.gitRepo.message}</p>}
+              <p className="text-xs text-gray-400 mt-1">
+                Fork <a href="https://github.com/ntando-deeev/NightFuryBot" target="_blank" rel="noreferrer" className="text-purple-500 hover:underline">ntando-deeev/NightFuryBot</a> to your GitHub account, then paste your fork URL here. The repo must be <strong>public</strong> or connected to Render.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Branch</label>
+              <input
+                {...register('gitBranch')}
+                className={field}
+                placeholder="main"
+                defaultValue="main"
+              />
+              <p className="text-xs text-gray-400 mt-1">Leave as <code className="bg-gray-100 px-1 rounded">main</code> unless you use a different branch.</p>
+            </div>
+          </div>
+
+          {/* Divider */}
+          <hr className="border-gray-200" />
             <label className="block text-sm font-medium text-gray-700 mb-1">Host Provider</label>
             <select {...register('hostProvider')} className={field}>
               <option value="render">Render.com (recommended)</option>
