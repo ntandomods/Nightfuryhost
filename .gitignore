@@ -1,0 +1,66 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+/node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Build files
+/build
+/dist
+.next
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+logs/
+*.log
+
+# Runtime
+pids/
+*.pid
+tmp/
+temp/
+
+# Session files
+sessions/
+
+# Backups
+backups/
+*.backup
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Docker
+docker-compose.override.yml
+
+# Frontend build
+frontend/build/
+frontend/dist/
+
+# Miscellaneous
+.eslintcache
+.env.test
+.cache/
