@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { toast } from 'react-toastify';
 
@@ -14,6 +15,7 @@ const StatCard = ({ label, value, color }) => (
 
 export const AdminPage = () => {
   const { token, user } = useAuthStore();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [hosts, setHosts] = useState([]);
@@ -22,6 +24,14 @@ export const AdminPage = () => {
   const [bonusModal, setBonusModal] = useState(null);
   const [bonusAmount, setBonusAmount] = useState('');
   const [bonusReason, setBonusReason] = useState('');
+
+  // Guard: non-admins get bounced immediately
+  useEffect(() => {
+    if (user && !user.isAdmin) {
+      toast.error('Admin access required');
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
 
   const headers = { Authorization: 'Bearer ' + token };
 

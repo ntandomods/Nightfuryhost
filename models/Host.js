@@ -27,9 +27,12 @@ const hostSchema = new mongoose.Schema({
   },
   deploymentUrl: String,
   renderServiceId: String,
+  deployUrl: String,
+  errorMessage: String,
   whatsappPhoneNumber: String,
   sessionId: String,
   ownerNumbers: [String],
+  openaiKey: String,
   isPublic: {
     type: Boolean,
     default: false

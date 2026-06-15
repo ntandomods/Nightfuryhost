@@ -83,15 +83,18 @@ export const HostsPage = () => {
                   {h.status}
                 </span>
               </div>
-              {h.deploymentUrl && (
+              {(h.deployUrl || h.deploymentUrl) && (
                 <a
-                  href={h.deploymentUrl}
+                  href={h.deployUrl || h.deploymentUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs text-blue-500 hover:underline break-all block mb-3"
                 >
-                  {h.deploymentUrl}
+                  {h.deployUrl || h.deploymentUrl}
                 </a>
+              )}
+              {h.status === 'error' && h.errorMessage && (
+                <p className="text-xs text-red-500 mb-2">⚠️ {h.errorMessage}</p>
               )}
               <div className="flex gap-2 flex-wrap">
                 {h.status !== 'running' && (

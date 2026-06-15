@@ -43,30 +43,54 @@ async function logTransaction(data) {
 async function deployToRender(host, user) {
   if (!process.env.RENDER_API_KEY) return;
   try {
+    // Build env vars for the bot — SESSION_ID is required for WhatsApp auth
+    const envVars = [
+      { key: 'NODE_ENV',      value: 'production' },
+      { key: 'BOT_NAME',      value: host.botName },
+      { key: 'HOST_ID',       value: String(host._id) },
+      // Suppress puppeteer download (not needed by NightFuryBot)
+      { key: 'PUPPETEER_SKIP_DOWNLOAD',          value: 'true' },
+      { key: 'PUPPETEER_SKIP_CHROMIUM_DOWNLOAD', value: 'true' },
+    ];
+
+    if (host.sessionId)    envVars.push({ key: 'SESSION_ID',    value: host.sessionId });
+    if (host.ownerNumbers) {
+      const owners = Array.isArray(host.ownerNumbers)
+        ? host.ownerNumbers.join(',')
+        : String(host.ownerNumbers);
+      if (owners) envVars.push({ key: 'OWNER_NUMBER', value: owners });
+    }
+    if (host.openaiKey)    envVars.push({ key: 'OPENAI_KEY',    value: host.openaiKey });
+
     const response = await axios.post(
       'https://api.render.com/v1/services',
       {
-        type: 'web_service',
-        name: 'nightfury-' + host.botName + '-' + host._id,
+        // background_worker so Render doesn't kill it for missing HTTP port
+        type: 'background_worker',
+        name: ('nightfury-' + host.botName + '-' + host._id)
+          .toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 63),
         ownerId: process.env.RENDER_OWNER_ID,
-        repo: 'https://github.com/ntandomods/Nightfuryhost',
+        // Deploy the actual bot repo, not the hosting platform
+        repo: 'https://github.com/ntando-deeev/NightFuryBot',
         branch: 'main',
-        buildCommand: 'npm install',
+        // Skip puppeteer download during build too
+        buildCommand: 'PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install',
         startCommand: 'npm start',
-        envVars: [
-          { key: 'NODE_ENV', value: 'production' },
-          { key: 'BOT_NAME', value: host.botName },
-          { key: 'HOST_ID', value: String(host._id) },
-        ],
+        envVars,
       },
       { headers: { Authorization: 'Bearer ' + process.env.RENDER_API_KEY } }
     );
-    const serviceId = response.data && response.data.service && response.data.service.id;
+
+    // Render v1 returns { service: {...} }
+    const svc = response.data && (response.data.service || response.data);
+    const serviceId = svc && svc.id;
     if (serviceId) {
       const updates = {
         renderServiceId: serviceId,
         status: 'running',
-        deployUrl: 'https://' + response.data.service.slug + '.onrender.com',
+        deployUrl: svc.serviceDetails && svc.serviceDetails.url
+          ? svc.serviceDetails.url
+          : 'https://dashboard.render.com/worker/' + serviceId,
       };
       if (global.dbConnected) {
         await Host.findByIdAndUpdate(host._id, updates);
@@ -75,7 +99,14 @@ async function deployToRender(host, user) {
       }
     }
   } catch (err) {
-    console.error('Render deploy error:', err.message);
+    console.error('Render deploy error:', err.response ? JSON.stringify(err.response.data) : err.message);
+    // Mark host as failed so user can see it rather than spinning forever
+    const failUpdate = { status: 'error', errorMessage: err.message };
+    if (global.dbConnected) {
+      await Host.findByIdAndUpdate(host._id, failUpdate).catch(() => {});
+    } else {
+      global.inMemoryDB.updateHost(host._id, failUpdate);
+    }
   }
 }
 
@@ -93,7 +124,7 @@ async function deleteFromRender(host) {
 
 exports.createHost = async (req, res) => {
   try {
-    const { botName, hostProvider, whatsappPhoneNumber, ownerNumbers } = req.body;
+    const { botName, hostProvider, whatsappPhoneNumber, ownerNumbers, sessionId, openaiKey } = req.body;
     const userId = req.user.id;
 
     if (!botName || !hostProvider) {
@@ -123,6 +154,13 @@ exports.createHost = async (req, res) => {
       });
     }
 
+    // Normalise ownerNumbers — accept comma string or array
+    const normaliseOwners = (raw) => {
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw.map(s => String(s).trim()).filter(Boolean);
+      return String(raw).split(',').map(s => s.trim()).filter(Boolean);
+    };
+
     let host;
     if (global.dbConnected) {
       host = new Host({
@@ -131,7 +169,9 @@ exports.createHost = async (req, res) => {
         botName,
         hostProvider,
         whatsappPhoneNumber,
-        ownerNumbers: ownerNumbers || [],
+        ownerNumbers: normaliseOwners(ownerNumbers),
+        sessionId: sessionId || '',
+        openaiKey: openaiKey || '',
         status: 'deploying',
       });
       await host.save();
@@ -142,7 +182,9 @@ exports.createHost = async (req, res) => {
         botName,
         hostProvider,
         whatsappPhoneNumber,
-        ownerNumbers: ownerNumbers || [],
+        ownerNumbers: normaliseOwners(ownerNumbers),
+        sessionId: sessionId || '',
+        openaiKey: openaiKey || '',
         status: 'deploying',
       });
     }
