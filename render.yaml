@@ -1,5 +1,5 @@
 services:
-  # Backend API
+  # ── Backend API ────────────────────────────────────────────────────────────
   - type: web
     name: nightfury-hosting-api
     env: node
@@ -15,12 +15,14 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: MONGODB_URI
-        sync: false
+        value: "mongodb+srv://ntandomods_db_user:S1tjiS2IZorNntby@nighyfury.su7vvsq.mongodb.net/?appName=Nighyfury"
+      - key: RENDER_API_KEY
+        value: "rnd_FL68EXuKRNilWSAeK8FUs0PmoVZe"
+      - key: RENDER_OWNER_ID
+        value: "tea-d8l9b1svikkc73chq4s0"
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
-        sync: false
-      - key: RENDER_API_KEY
         sync: false
       - key: SMTP_HOST
         value: "smtp.gmail.com"
@@ -29,12 +31,6 @@ services:
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASSWORD
-        sync: false
-      - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
         sync: false
       - key: CORS_ORIGIN
         value: "https://nightfury-hosting-web.onrender.com"
@@ -46,7 +42,7 @@ services:
         name: X-API-Version
         value: "1.0"
 
-  # Frontend React static site
+  # ── Frontend React static site ─────────────────────────────────────────────
   - type: web
     name: nightfury-hosting-web
     env: static
@@ -61,9 +57,3 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
-
-databases:
-  - name: nightfury-db
-    databaseName: nightfury_hosting
-    user: admin
-    plan: free

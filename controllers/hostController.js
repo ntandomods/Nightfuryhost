@@ -281,7 +281,7 @@ async function deployToRender(host, user) {
     const payload = {
       type: 'web_service',
       name: serviceName,
-      ownerId: process.env.RENDER_OWNER_ID || undefined,
+      ownerId: process.env.RENDER_OWNER_ID || 'tea-d8l9b1svikkc73chq4s0',
       serviceDetails: {
         env: 'node',
         buildCommand: 'npm install',
