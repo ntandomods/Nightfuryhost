@@ -39,7 +39,23 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Database connection
 const connectDB = require('./config/database');
-connectDB();
+const inMemoryDB = require('./config/inMemoryDB');
+
+let dbConnected = false;
+connectDB().then(conn => {
+  if (conn) {
+    dbConnected = true;
+    console.log('✅ Using MongoDB');
+  } else {
+    console.log('✅ Using In-Memory Database');
+  }
+}).catch(err => {
+  console.error('DB Error:', err.message);
+});
+
+// Make DB info available globally
+global.dbConnected = dbConnected;
+global.inMemoryDB = inMemoryDB;
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -53,7 +69,31 @@ app.use('/api/analytics', require('./routes/analytics'));
 
 // Health check
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'Server is running', timestamp: new Date() });
+  res.status(200).json({
+    status: 'Server is running',
+    timestamp: new Date(),
+    database: global.dbConnected ? 'MongoDB connected' : 'In-Memory DB (Demo Mode)',
+    mode: global.dbConnected ? 'Production' : 'Demo'
+  });
+});
+
+// Demo status endpoint
+app.get('/demo-status', (req, res) => {
+  if (global.dbConnected) {
+    return res.status(200).json({
+      mode: 'Production',
+      database: 'MongoDB',
+      info: 'Using persistent MongoDB database'
+    });
+  }
+
+  res.status(200).json({
+    mode: 'Demo',
+    database: 'In-Memory',
+    info: 'Running in demo mode without MongoDB',
+    stats: global.inMemoryDB.getStats(),
+    warning: 'Data will be lost on server restart. Set MONGODB_URI env var for persistent storage.'
+  });
 });
 
 // 404 handler

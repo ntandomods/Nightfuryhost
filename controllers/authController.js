@@ -31,23 +31,41 @@ exports.register = async (req, res) => {
       return res.status(400).json({ error: 'Passwords do not match' });
     }
 
-    // Check if user exists
-    let user = await User.findOne({ $or: [{ email }, { username }] });
-    if (user) {
-      return res.status(400).json({ error: 'User already exists' });
+    let user;
+
+    if (global.dbConnected) {
+      // Use MongoDB
+      user = await User.findOne({ $or: [{ email }, { username }] });
+      if (user) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+
+      user = new User({
+        username,
+        email,
+        password,
+        coins: 100
+      });
+
+      await user.save();
+    } else {
+      // Use In-Memory DB
+      const bcrypt = require('bcryptjs');
+      
+      if (global.inMemoryDB.findUserByEmail(email) || global.inMemoryDB.findUserByUsername(username)) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      user = global.inMemoryDB.createUser({
+        username,
+        email,
+        password: hashedPassword,
+        coins: 100,
+        tier: 'free'
+      });
     }
 
-    // Create user
-    user = new User({
-      username,
-      email,
-      password,
-      coins: 100 // Welcome bonus
-    });
-
-    await user.save();
-
-    // Generate token
     const token = generateToken(user._id);
 
     res.status(201).json({
@@ -71,38 +89,51 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const bcrypt = require('bcryptjs');
 
     // Validation
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // Find user and select password
-    const user = await User.findOne({ email }).select('+password');
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+    let user;
+
+    if (global.dbConnected) {
+      // Use MongoDB
+      user = await User.findOne({ email }).select('+password');
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      const isMatch = await user.comparePassword(password);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      user.loginHistory.push({
+        timestamp: new Date(),
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
+
+      if (user.loginHistory.length > 10) {
+        user.loginHistory.shift();
+      }
+
+      await user.save();
+    } else {
+      // Use In-Memory DB
+      user = global.inMemoryDB.findUserByEmail(email);
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
     }
 
-    // Compare password
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Update login history
-    user.loginHistory.push({
-      timestamp: new Date(),
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent')
-    });
-
-    if (user.loginHistory.length > 10) {
-      user.loginHistory.shift();
-    }
-
-    await user.save();
-
-    // Generate token
     const token = generateToken(user._id);
 
     res.status(200).json({
@@ -114,8 +145,8 @@ exports.login = async (req, res) => {
         username: user.username,
         email: user.email,
         coins: user.coins,
-        tier: user.tier,
-        isAdmin: user.isAdmin
+        tier: user.tier || 'free',
+        isAdmin: user.isAdmin || false
       }
     });
   } catch (error) {
